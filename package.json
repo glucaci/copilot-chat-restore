@@ -1,0 +1,83 @@
+{
+  "name": "copilot-chat-restore",
+  "displayName": "Copilot Chat Session Finder",
+  "description": "Search and browse Copilot chat sessions.",
+  "version": "1.0.0",
+  "publisher": "glucaci",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/glucaci/copilot-chat-restore.git"
+  },
+  "bugs": {
+    "url": "https://github.com/glucaci/copilot-chat-restore/issues"
+  },
+  "homepage": "https://github.com/glucaci/copilot-chat-restore#readme",
+  "keywords": [
+    "copilot",
+    "chat",
+    "session",
+    "history",
+    "restore"
+  ],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "chatRestore",
+          "title": "Chat Session Finder",
+          "icon": "$(history)"
+        }
+      ]
+    },
+    "views": {
+      "chatRestore": [
+        {
+          "id": "chatRestore.sessionsView",
+          "name": "Sessions",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "chatRestore.searchSessions",
+        "title": "Chat Restore: Search Sessions…"
+      },
+      {
+        "command": "chatRestore.refresh",
+        "title": "Chat Restore: Refresh Session List",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "chatRestore.refresh",
+          "when": "view == chatRestore.sessionsView",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.6.0",
+    "typescript": "^5.4.0"
+  }
+}
