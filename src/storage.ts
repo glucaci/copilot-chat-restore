@@ -1,7 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFile } from 'child_process';
 import * as vscode from 'vscode';
+
+const OPEN_MARKER_PREFIX = 'open-workspace-';
+const OPEN_MARKER_MAX_AGE_MS = 2 * 60 * 1000;
+const OPEN_MARKER_HEARTBEAT_MS = 30 * 1000;
 
 /** Kind of workspace a storage dir represents. */
 export type WorkspaceKind = 'folder' | 'workspace-file' | 'untitled' | 'empty' | 'unknown';
@@ -50,9 +53,10 @@ export function getCurrentHash(context: vscode.ExtensionContext): string | undef
 
 function decodeFileUri(uri: string): string {
 	try {
-		return decodeURIComponent(uri.replace(/^file:\/\//, ''));
+		const parsed = vscode.Uri.parse(uri);
+		return parsed.scheme === 'file' ? parsed.fsPath : uri;
 	} catch {
-		return uri.replace(/^file:\/\//, '');
+		return uri;
 	}
 }
 
@@ -93,7 +97,7 @@ export function classifyStorage(userDir: string, dir: string): StorageInfo {
 		// Saved multi-root workspaces are `.code-workspace` files; untitled
 		// workspaces are generated `workspace.json` files under the app's
 		// `Workspaces/` store.
-		const isUntitled = !wsPath.endsWith('.code-workspace');
+		const isUntitled = !wsPath.toLowerCase().endsWith('.code-workspace');
 		base.folders = readWorkspaceFileFolders(wsPath);
 		base.openTarget = wsPath;
 		base.openTargetIsWorkspaceFile = true;
@@ -123,7 +127,7 @@ function readWorkspaceFileFolders(wsPath: string): string[] {
 		const out: string[] = [];
 		for (const entry of raw.folders ?? []) {
 			if (typeof entry.path === 'string') {
-				out.push(path.normalize(path.join(parent, entry.path)));
+				out.push(path.resolve(parent, entry.path));
 			} else if (typeof entry.uri === 'string') {
 				out.push(decodeFileUri(entry.uri));
 			}
@@ -159,29 +163,88 @@ export function listStorages(context: vscode.ExtensionContext): StorageInfo[] {
 	return out;
 }
 
-/**
- * Best-effort detection of workspace storages that are currently open in a
- * running VS Code window, by inspecting which state.vscdb files are held open.
- * Uses `lsof` (macOS/Linux). Returns a set of storage hashes.
- */
-export async function getOpenHashes(base: string): Promise<Set<string>> {
-	const open = new Set<string>();
-	if (process.platform === 'win32') {
-		return open; // lsof unavailable; caller falls back to excluding current only.
+interface OpenWorkspaceMarker {
+	pid: number;
+	hash: string;
+	updatedAt: number;
+}
+
+function markerPath(context: vscode.ExtensionContext, hash: string): string {
+	return path.join(
+		context.globalStorageUri.fsPath,
+		`${OPEN_MARKER_PREFIX}${process.pid}-${hash}.json`
+	);
+}
+
+function isProcessRunning(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error: any) {
+		return error?.code === 'EPERM';
 	}
-	return new Promise((resolve) => {
-		execFile('lsof', ['-Fn', '+D', base], { maxBuffer: 32 * 1024 * 1024 }, (err, stdout) => {
-			// lsof exits non-zero when some files can't be accessed; still parse stdout.
-			const text = stdout || '';
-			const re = new RegExp(
-				base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/([0-9a-f]{32})/',
-				'g'
-			);
-			let m: RegExpExecArray | null;
-			while ((m = re.exec(text)) !== null) {
-				open.add(m[1]);
-			}
-			resolve(open);
-		});
+}
+
+/** Register this window so other extension hosts can exclude its storage. */
+export function registerOpenWorkspace(context: vscode.ExtensionContext): vscode.Disposable {
+	const hash = getCurrentHash(context);
+	if (!hash) {
+		return new vscode.Disposable(() => undefined);
+	}
+
+	const file = markerPath(context, hash);
+	const writeMarker = (): void => {
+		try {
+			fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
+			const marker: OpenWorkspaceMarker = { pid: process.pid, hash, updatedAt: Date.now() };
+			fs.writeFileSync(file, JSON.stringify(marker), 'utf8');
+		} catch {
+			// The current workspace is still excluded directly by the caller.
+		}
+	};
+
+	writeMarker();
+	const heartbeat = setInterval(writeMarker, OPEN_MARKER_HEARTBEAT_MS);
+	return new vscode.Disposable(() => {
+		clearInterval(heartbeat);
+		try {
+			fs.unlinkSync(file);
+		} catch {
+			/* already removed or storage unavailable */
+		}
 	});
+}
+
+/** Return workspace hashes registered by other live VS Code windows. */
+export async function getOpenHashes(context: vscode.ExtensionContext): Promise<Set<string>> {
+	const open = new Set<string>();
+	let files: string[];
+	try {
+		files = fs.readdirSync(context.globalStorageUri.fsPath);
+	} catch {
+		return open;
+	}
+
+	for (const name of files) {
+		if (!name.startsWith(OPEN_MARKER_PREFIX) || !name.endsWith('.json')) {
+			continue;
+		}
+		const file = path.join(context.globalStorageUri.fsPath, name);
+		try {
+			const marker = JSON.parse(fs.readFileSync(file, 'utf8')) as OpenWorkspaceMarker;
+			const fresh = Date.now() - marker.updatedAt <= OPEN_MARKER_MAX_AGE_MS;
+			if (fresh && /^[0-9a-f]{32}$/.test(marker.hash) && isProcessRunning(marker.pid)) {
+				open.add(marker.hash);
+				continue;
+			}
+		} catch {
+			/* remove malformed markers below */
+		}
+		try {
+			fs.unlinkSync(file);
+		} catch {
+			/* best-effort stale marker cleanup */
+		}
+	}
+	return open;
 }

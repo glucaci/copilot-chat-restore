@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import {
-	getWorkspaceStorageBase,
 	getCurrentHash,
 	getOpenHashes,
 	listStorages,
@@ -67,9 +66,8 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 		if (this.storages) {
 			return this.storages;
 		}
-		const base = getWorkspaceStorageBase(this.context);
 		const currentHash = getCurrentHash(this.context);
-		const openHashes = await getOpenHashes(base);
+		const openHashes = await getOpenHashes(this.context);
 		if (currentHash) {
 			openHashes.add(currentHash);
 		}

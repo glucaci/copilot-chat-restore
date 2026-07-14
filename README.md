@@ -21,7 +21,7 @@ Search and browse GitHub Copilot chat sessions stored by closed VS Code workspac
 
 The extension reads local VS Code workspace storage to locate GitHub Copilot chat session files. Search and rendering happen locally. The extension does not upload session contents or collect telemetry.
 
-Currently open workspace storage is excluded using `lsof` on macOS and Linux. On Windows, only the current workspace is excluded.
+Currently open workspace storage is excluded on macOS, Linux, and Windows using lightweight markers coordinated between extension hosts.
 
 ## Requirements
 

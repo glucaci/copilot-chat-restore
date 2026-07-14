@@ -1,8 +1,11 @@
 import * as vscode from 'vscode';
 import { SessionContentProvider, SCHEME } from './content';
+import { registerOpenWorkspace } from './storage';
 import { SessionsViewProvider } from './view';
 
 export function activate(context: vscode.ExtensionContext): void {
+	context.subscriptions.push(registerOpenWorkspace(context));
+
 	const content = new SessionContentProvider();
 	context.subscriptions.push(
 		vscode.workspace.registerTextDocumentContentProvider(SCHEME, content)
